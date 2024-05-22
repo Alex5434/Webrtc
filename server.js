@@ -10,6 +10,10 @@ const rooms = {};
 io.on("connection", socket => {
     socket.on("join room", roomID => {
         if (rooms[roomID]) {
+            if (rooms[roomID].length > 2) {
+                socket.emit('limit-reached', socket.id)
+                return
+            }
             rooms[roomID].push(socket.id);
         } else {
             rooms[roomID] = [socket.id];
@@ -17,10 +21,9 @@ io.on("connection", socket => {
         const otherUser = rooms[roomID].find(id => id !== socket.id);
         if (otherUser) {
             socket.emit("other user", otherUser);
-            socket.to(otherUser).emit("user joined", socket.id);
-        }
-    });
-
+        }   
+    })
+    
     socket.on("offer", payload => {
         io.to(payload.target).emit("offer", payload);
     });
@@ -32,7 +35,25 @@ io.on("connection", socket => {
     socket.on("ice-candidate", incoming => {
         io.to(incoming.target).emit("ice-candidate", incoming.candidate);
     });
+
+    socket.on("disconnect", () => {
+        for (const roomID in rooms) {
+            const index = rooms[roomID].indexOf(socket.id);
+            if (index !== -1) {
+                rooms[roomID].splice(index, 1);
+                const otherUser = rooms[roomID].find(id => id !== socket.id);
+                if (otherUser) {
+                    socket.to(otherUser).emit("user disconnected", socket.id);
+                }
+                if (rooms[roomID].length === 0) {
+                    delete rooms[roomID];
+                }
+                break;
+            }
+        }
+    });
 });
 
 
-server.listen(8000, () => console.log('server is running on port 8000'));
+
+server.listen(8000, (url) => console.log('server is running on port 8000', url));

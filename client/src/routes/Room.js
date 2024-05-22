@@ -1,93 +1,103 @@
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, useState } from "react";
 import io from "socket.io-client";
 
 const Room = (props) => {
     const userVideo = useRef();
     const partnerVideo = useRef();
-    const peerRef = useRef();
-    const socketRef = useRef();
+    const curRef = useRef();
     const otherUser = useRef();
+    const socketRef = useRef();
     const userStream = useRef();
 
     useEffect(() => {
-        navigator.mediaDevices.getUserMedia({ audio: true, video: true }).then(stream => {
-            userVideo.current.srcObject = stream;
-            userStream.current = stream;
-
-            socketRef.current = io.connect("/");
-            socketRef.current.emit("join room", props.match.params.roomID);
-
-            socketRef.current.on('other user', userID => {
-                callUser(userID);
-                otherUser.current = userID;
-            });
-
-            socketRef.current.on("user joined", userID => {
-                otherUser.current = userID;
-            });
-
-            socketRef.current.on("offer", handleRecieveCall);
-
-            socketRef.current.on("answer", handleAnswer);
-
-            socketRef.current.on("ice-candidate", handleNewICECandidateMsg);
-        });
-
+        navigator.mediaDevices.getDisplayMedia({
+            video: true,
+            audio: true,
+        }).then(handleMediaStream)
+            .catch(err => {
+                console.log(err);
+            })
     }, []);
 
+    function handleRoom(roomId) {
+        alert("Limit Reached")
+    }
+
+    const handleMediaStream = (stream => {
+        userVideo.current.srcObject = stream;
+        userStream.current = stream;
+
+        socketRef.current = io.connect('/')
+
+        socketRef.current.emit("join room", props.match.params.roomID);
+
+        socketRef.current.on('other user', userID => {
+            callUser(userID);
+            otherUser.current = userID;
+        });
+
+        socketRef.current.on("offer", handleReceiveCall);
+
+        socketRef.current.on("answer", handleAnswer);
+
+        socketRef.current.on("ice-candidate", handleNewICECandidateMsg);
+
+        socketRef.current.on("limit-reached", handleRoom)
+    })
+
     function callUser(userID) {
-        peerRef.current = createPeer(userID);
-        userStream.current.getTracks().forEach(track => peerRef.current.addTrack(track, userStream.current));
+        curRef.current = createPeer(userID);
+        userStream.current.getTracks().forEach(track => curRef.current.addTrack(track, userStream.current));
     }
 
     function createPeer(userID) {
+
         const peer = new RTCPeerConnection({
+            iceTransportPolicy: "all",
             iceServers: [
+                { urls: "stun:stun.l.google.com:19302" },
                 {
-                    urls: "stun:stun.stunprotocol.org"
-                },
-                {
-                    urls: 'turn:numb.viagenie.ca',
-                    credential: 'muazkh',
-                    username: 'webrtc@live.com'
-                },
-            ]
+                    urls: "turn:10.252.73.50",
+                    username: "webrtc", credential: "firefox"
+                }]
         });
+
 
         peer.onicecandidate = handleICECandidateEvent;
         peer.ontrack = handleTrackEvent;
         peer.onnegotiationneeded = () => handleNegotiationNeededEvent(userID);
-
         return peer;
     }
 
     function handleNegotiationNeededEvent(userID) {
-        peerRef.current.createOffer().then(offer => {
-            return peerRef.current.setLocalDescription(offer);
-        }).then(() => {
-            const payload = {
-                target: userID,
-                caller: socketRef.current.id,
-                sdp: peerRef.current.localDescription
-            };
-            socketRef.current.emit("offer", payload);
-        }).catch(e => console.log(e));
+        curRef.current.createOffer()
+            .then(offer => {
+                return curRef.current.setLocalDescription(offer);
+            })
+            .then(() => {
+                const payload = {
+                    target: userID,
+                    caller: socketRef.current.id,
+                    sdp: curRef.current.localDescription
+                };
+                socketRef.current.emit("offer", payload);
+            }).catch(e => console.log(e));
     }
 
-    function handleRecieveCall(incoming) {
-        peerRef.current = createPeer();
+    function handleReceiveCall(incoming) {
+        curRef.current = createPeer();
         const desc = new RTCSessionDescription(incoming.sdp);
-        peerRef.current.setRemoteDescription(desc).then(() => {
-            userStream.current.getTracks().forEach(track => peerRef.current.addTrack(track, userStream.current));
+        curRef.current.setRemoteDescription(desc).then(() => {
+            userStream.current.getTracks().forEach(track => curRef.current.addTrack(track, userStream.current));
         }).then(() => {
-            return peerRef.current.createAnswer();
+            return curRef.current.createAnswer();
         }).then(answer => {
-            return peerRef.current.setLocalDescription(answer);
+            return curRef.current.setLocalDescription(answer);
         }).then(() => {
             const payload = {
                 target: incoming.caller,
                 caller: socketRef.current.id,
-                sdp: peerRef.current.localDescription
+                sdp: curRef.current.localDescription
             }
             socketRef.current.emit("answer", payload);
         })
@@ -95,7 +105,7 @@ const Room = (props) => {
 
     function handleAnswer(message) {
         const desc = new RTCSessionDescription(message.sdp);
-        peerRef.current.setRemoteDescription(desc).catch(e => console.log(e));
+        curRef.current.setRemoteDescription(desc).catch(e => console.log(e));
     }
 
     function handleICECandidateEvent(e) {
@@ -109,9 +119,10 @@ const Room = (props) => {
     }
 
     function handleNewICECandidateMsg(incoming) {
+        // console.log("The ice candidate issss", incoming, socketRef.current, curRef.current);
         const candidate = new RTCIceCandidate(incoming);
 
-        peerRef.current.addIceCandidate(candidate)
+        curRef.current.addIceCandidate(candidate)
             .catch(e => console.log(e));
     }
 
@@ -120,10 +131,13 @@ const Room = (props) => {
     };
 
     return (
-        <div>
-            <video autoPlay ref={userVideo} />
-            <video autoPlay ref={partnerVideo} />
-        </div>
+        <>
+            <div style={{ width: "100", height: "90vh", position: "relative" }}>
+                <video autoPlay style={{ width: "30%", height: "30%", position: "absolute", right: "10px", bottom: "10px" }} ref={userVideo} />
+                <video autoPlay style={{ height: "100%" }} ref={partnerVideo} />
+            </div>
+        </>
+
     );
 };
 
